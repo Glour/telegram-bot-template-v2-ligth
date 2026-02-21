@@ -18,7 +18,7 @@ class Base(DeclarativeBase):
     """Base class for all SQLAlchemy models."""
 
     repr_cols_num = 6
-    repr_cols: tuple[str, ...] = tuple()
+    repr_cols: tuple[str, ...] = ()
 
     def __repr__(self) -> str:
         """String representation of model."""

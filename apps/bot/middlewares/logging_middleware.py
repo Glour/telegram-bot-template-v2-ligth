@@ -1,5 +1,4 @@
 """Logging middleware for tracking requests."""
-import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -21,9 +20,6 @@ class LoggingMiddleware(BaseMiddleware):
         data: dict[str, Any],
     ) -> Any:
         """Log request and response."""
-        start_time = time.time()
-
-        # Extract event info
         if isinstance(event, Message):
             event_type = "message"
             user_id = event.from_user.id if event.from_user else None
@@ -40,36 +36,14 @@ class LoggingMiddleware(BaseMiddleware):
             username = None
             text = None
 
-        logger.info(
-            "bot_event_received",
-            event_type=event_type,
-            user_id=user_id,
-            username=username,
-            text=text,
-        )
+        logger.info("Event received: type=%s, user_id=%s, username=%s, text=%s", event_type, user_id, username, text)
 
         try:
             result = await handler(event, data)
-
-            duration = time.time() - start_time
-            logger.info(
-                "bot_event_processed",
-                event_type=event_type,
-                user_id=user_id,
-                duration_ms=round(duration * 1000, 2),
-                status="success",
-            )
-
+            logger.info("Event processed: type=%s, user_id=%s, status=success", event_type, user_id)
             return result
-
         except Exception as e:
-            duration = time.time() - start_time
             logger.error(
-                "bot_event_error",
-                event_type=event_type,
-                user_id=user_id,
-                duration_ms=round(duration * 1000, 2),
-                error=str(e),
-                error_type=type(e).__name__,
+                "Event error: type=%s, user_id=%s, error=%s (%s)", event_type, user_id, e, type(e).__name__
             )
             raise

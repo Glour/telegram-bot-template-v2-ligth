@@ -4,7 +4,6 @@ from typing import Self
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from infrastructure.database.repositories.analytics_repository import AnalyticsRepository
 from infrastructure.database.repositories.user_repository import UserRepository
 
 
@@ -14,7 +13,6 @@ class UnitOfWork:
     def __init__(self, session: AsyncSession):
         self.session = session
         self._users: UserRepository | None = None
-        self._analytics: AnalyticsRepository | None = None
 
     @property
     def users(self) -> UserRepository:
@@ -23,12 +21,7 @@ class UnitOfWork:
             self._users = UserRepository(self.session)
         return self._users
 
-    @property
-    def analytics(self) -> AnalyticsRepository:
-        """Get Analytics repository."""
-        if self._analytics is None:
-            self._analytics = AnalyticsRepository(self.session)
-        return self._analytics
+    # === REGISTER NEW REPOSITORIES ABOVE ===
 
     async def commit(self) -> None:
         """Commit the transaction."""

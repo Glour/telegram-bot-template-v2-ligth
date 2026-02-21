@@ -26,15 +26,3 @@ class Language(str, Enum):
     RU = "ru"
     EN = "en"
     UK = "uk"
-
-
-class EventType(str, Enum):
-    """Analytics event types."""
-
-    USER_REGISTERED = "user_registered"
-    USER_BLOCKED_BOT = "user_blocked_bot"
-    USER_UNBLOCKED_BOT = "user_unblocked_bot"
-    COMMAND_EXECUTED = "command_executed"
-    MESSAGE_SENT = "message_sent"
-    BUTTON_CLICKED = "button_clicked"
-    ERROR_OCCURRED = "error_occurred"

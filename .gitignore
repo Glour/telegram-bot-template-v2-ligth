@@ -68,11 +68,6 @@ dmypy.json
 # Alembic
 alembic/versions/*.pyc
 
-# Monitoring data (local)
-prometheus_data/
-grafana_data/
-loki_data/
-
 # Temporary files
 *.tmp
 *.bak

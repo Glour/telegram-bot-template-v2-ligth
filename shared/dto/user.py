@@ -50,15 +50,3 @@ class UserResponseDTO(BaseModel):
         if self.username:
             return f"@{self.username}"
         return self.full_name or self.first_name
-
-
-class UserStatsDTO(BaseModel):
-    """DTO for user statistics."""
-
-    total_users: int = 0
-    active_users: int = 0
-    blocked_users: int = 0
-    banned_users: int = 0
-    new_users_today: int = 0
-    new_users_this_week: int = 0
-    new_users_this_month: int = 0

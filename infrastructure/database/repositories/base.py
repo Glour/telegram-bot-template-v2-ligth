@@ -1,5 +1,6 @@
 """Base repository with common CRUD operations."""
-from typing import Any, Generic, Sequence, Type, TypeVar
+from collections.abc import Sequence
+from typing import Any, Generic, TypeVar
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +13,7 @@ ModelType = TypeVar("ModelType", bound=Base)
 class BaseRepository(Generic[ModelType]):
     """Base repository for all database operations."""
 
-    def __init__(self, session: AsyncSession, model: Type[ModelType]):
+    def __init__(self, session: AsyncSession, model: type[ModelType]):
         self.session = session
         self.model = model
 

@@ -4,13 +4,8 @@ networks:
 
 volumes:
   postgres_data:
-  redis_data:
-  prometheus_data:
-  grafana_data:
-  loki_data:
 
 services:
-  # Core Services
   postgres:
     image: postgres:16-alpine
     container_name: postgres
@@ -22,7 +17,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES__DB_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES__DB_NAME:-telegram_bot}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_EXTERNAL_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES__DB_USER:-postgres}"]
       interval: 5s
@@ -31,23 +26,6 @@ services:
     networks:
       - bot_network
 
-  redis:
-    image: redis:7-alpine
-    container_name: redis
-    restart: unless-stopped
-    volumes:
-      - redis_data:/data
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    networks:
-      - bot_network
-
-  # Application Services
   bot:
     build:
       context: .
@@ -60,112 +38,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
     volumes:
-      - ./apps/bot:/app/apps/bot:ro
-      - ./infrastructure:/app/infrastructure:ro
-      - ./shared:/app/shared:ro
-      - ./config:/app/config:ro
-    ports:
-      - "9090:9090"  # Metrics port
-    networks:
-      - bot_network
-
-  admin:
-    build:
-      context: .
-      dockerfile: apps/admin/Dockerfile
-    container_name: admin_panel
-    restart: unless-stopped
-    env_file:
-      - .env
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ./apps/admin:/app/apps/admin:ro
-      - ./infrastructure:/app/infrastructure:ro
-      - ./shared:/app/shared:ro
-      - ./config:/app/config:ro
-    ports:
-      - "8000:8000"
-    networks:
-      - bot_network
-
-  # Monitoring Stack
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: prometheus
-    restart: unless-stopped
-    volumes:
-      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--web.enable-lifecycle'
-    ports:
-      - "9091:9090"
-    networks:
-      - bot_network
-
-  grafana:
-    image: grafana/grafana:latest
-    container_name: grafana
-    restart: unless-stopped
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
-    environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=http://localhost:3001
-    ports:
-      - "3001:3000"
-    depends_on:
-      - prometheus
-    networks:
-      - bot_network
-
-  loki:
-    image: grafana/loki:latest
-    container_name: loki
-    restart: unless-stopped
-    volumes:
-      - ./monitoring/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
-      - loki_data:/loki
-    command: -config.file=/etc/loki/loki-config.yml
-    ports:
-      - "3100:3100"
-    networks:
-      - bot_network
-
-  promtail:
-    image: grafana/promtail:latest
-    container_name: promtail
-    restart: unless-stopped
-    volumes:
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./monitoring/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
-    command: -config.file=/etc/promtail/promtail-config.yml
-    depends_on:
-      - loki
-    networks:
-      - bot_network
-
-  # Development Tools (comment out for production)
-  dozzle:
-    image: amir20/dozzle:latest
-    container_name: dozzle
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    ports:
-      - "8888:8080"
+      - ./apps/bot:/app/apps/bot
+      - ./infrastructure:/app/infrastructure
+      - ./shared:/app/shared
+      - ./config:/app/config
     networks:
       - bot_network

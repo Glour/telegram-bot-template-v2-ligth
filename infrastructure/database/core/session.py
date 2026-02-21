@@ -1,4 +1,5 @@
 """Database session management."""
+
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -23,6 +24,7 @@ def get_engine() -> AsyncEngine:
             max_overflow=settings.database.max_overflow,
             pool_pre_ping=settings.database.pool_pre_ping,
             pool_recycle=settings.database.pool_recycle,
+            connect_args=settings.database.async_connect_args,
             future=True,
         )
 

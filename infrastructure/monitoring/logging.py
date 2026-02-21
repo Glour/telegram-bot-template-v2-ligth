@@ -1,84 +1,31 @@
-"""Structured logging setup with structlog."""
+"""Standard Python logging setup."""
 import logging
 import sys
-from pathlib import Path
-
-import structlog
-from structlog.types import FilteringBoundLogger
 
 from config.settings.base import get_settings
 
 
-def setup_logging() -> FilteringBoundLogger:
-    """Configure structured logging with structlog."""
+def setup_logging() -> logging.Logger:
+    """Configure standard Python logging."""
     settings = get_settings()
 
-    # Configure standard library logging
+    # Configure root logger
     logging.basicConfig(
-        format="%(message)s",
-        stream=sys.stdout,
         level=settings.logging.log_level,
-    )
-
-    # File handler if enabled
-    if settings.logging.log_to_file:
-        log_path = Path(settings.logging.log_file_path)
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-
-        file_handler = logging.FileHandler(log_path)
-        file_handler.setLevel(settings.logging.log_level)
-        logging.root.addHandler(file_handler)
-
-    # Configure structlog processors
-    processors: list = [
-        structlog.contextvars.merge_contextvars,
-        structlog.processors.add_log_level,
-        structlog.processors.StackInfoRenderer(),
-    ]
-
-    if settings.logging.include_timestamp:
-        processors.append(structlog.processors.TimeStamper(fmt="iso"))
-
-    if settings.logging.include_caller:
-        processors.append(structlog.processors.CallsiteParameterAdder())
-
-    # Format based on settings
-    if settings.logging.format == "json":
-        processors.extend(
-            [
-                structlog.processors.format_exc_info,
-                structlog.processors.JSONRenderer(),
-            ]
-        )
-    else:
-        processors.extend(
-            [
-                structlog.processors.format_exc_info,
-                structlog.dev.ConsoleRenderer(colors=True),
-            ]
-        )
-
-    # Configure structlog
-    structlog.configure(
-        processors=processors,
-        wrapper_class=structlog.make_filtering_bound_logger(settings.logging.log_level),
-        context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
-
-    logger = structlog.get_logger()
-    logger.info(
-        "logging_configured",
-        level=settings.logging.level,
         format=settings.logging.format,
+        stream=sys.stdout,
     )
+
+    # Reduce noise from third-party libraries
+    logging.getLogger("aiogram").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
+
+    logger = logging.getLogger(settings.app_name)
+    logger.info("Logging configured (level=%s)", settings.logging.level)
 
     return logger
 
 
-def get_logger(name: str | None = None) -> FilteringBoundLogger:
+def get_logger(name: str | None = None) -> logging.Logger:
     """Get logger instance."""
-    if name:
-        return structlog.get_logger(name)
-    return structlog.get_logger()
+    return logging.getLogger(name or get_settings().app_name)

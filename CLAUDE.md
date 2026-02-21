@@ -4,318 +4,199 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a modern Telegram bot template v2 featuring microservices architecture with aiogram 3.13+, FastAPI admin panel, comprehensive monitoring (Prometheus/Grafana/Loki), and dependency injection via Dishka. The project follows clean architecture patterns with service layer, repository pattern, and Unit of Work.
+Lightweight Telegram bot template v2-light: aiogram 3.13+, PostgreSQL, Dishka DI, Repository + Unit of Work pattern. Supports two deployment modes: standalone Docker container with external DB, or docker-compose with local PostgreSQL.
 
-## Development Commands
+**For AI bot generation, see [AI_GENERATION_GUIDE.md](AI_GENERATION_GUIDE.md)** — full guide with registration checklists, code templates, and worked examples.
+
+## Deployment Modes
+
+### Standalone Docker (external DB)
+```bash
+docker build -t bot .
+docker run --env-file .env -e DATABASE_URL="postgresql://user:pass@host:5432/db?sslmode=require" bot
+```
+Uses root `Dockerfile`. Auto-runs `alembic upgrade head` on startup.
+
+### Docker Compose (local development)
+```bash
+docker compose up --build
+```
+Uses `apps/bot/Dockerfile` + local PostgreSQL container. Connection via `POSTGRES__*` env vars.
 
 ### Local Development
 ```bash
-# Install dependencies
 poetry install
-
-# Install with dev dependencies
 poetry install --with dev
-
-# Run bot locally (requires .env file)
 python3 apps/bot/main.py
-
-# Run admin panel locally
-python3 apps/admin/main.py
 ```
 
-### Docker Development
-```bash
-# Start all services (bot, admin, PostgreSQL, Redis, monitoring stack)
-docker compose up --build
-
-# Start in detached mode
-docker compose up -d --build
-
-# Stop all services
-docker compose down
-
-# View specific service logs
-docker compose logs -f bot
-docker compose logs -f admin
-
-# Rebuild specific service
-docker compose up --build bot
-```
+## Development Commands
 
 ### Database Migrations (Alembic)
 ```bash
-# Create new migration (prompts for migration name)
 sh scripts/alembic/create_migrations.sh
-
-# Run migrations (apply to database)
 sh scripts/alembic/run_migrations.sh
-
-# Downgrade one migration
 sh scripts/alembic/downgrade_migration.sh
+```
 
-# Manual migration commands inside container
+Scripts auto-detect environment: if `telegram_bot` container is running, use `docker exec`; otherwise run `alembic` directly.
+
+```bash
+# Manual commands inside container
 docker compose exec bot alembic revision --autogenerate -m "migration_name"
 docker compose exec bot alembic upgrade head
 docker compose exec bot alembic downgrade -1
-docker compose exec bot alembic current
 ```
-
-Note: Migration scripts execute commands inside the `telegram_bot` container using `docker exec tg_bot`. The container name is `telegram_bot` for the bot service.
 
 ### Testing
 ```bash
-# Run all tests
 poetry run pytest
-
-# Run with coverage report
 poetry run pytest --cov=apps --cov=infrastructure --cov-report=html --cov-report=term-missing
-
-# Run specific test file
-poetry run pytest tests/unit/test_user_service.py
-
-# Run specific test
-poetry run pytest tests/unit/test_user_service.py::test_register_user
 ```
 
 ### Code Quality
 ```bash
-# Linting
 poetry run ruff check .
-
-# Auto-fix linting issues
 poetry run ruff check . --fix
-
-# Type checking
 poetry run mypy .
-
-# Format check
 poetry run ruff format --check .
 ```
 
 ## Architecture Overview
 
 ### Application Structure
-The project uses a modular architecture with three main applications:
 
-1. **apps/bot/** - Telegram bot service (aiogram 3.13+)
-   - `main.py`: Entry point, bot initialization, polling setup
-   - `di_container.py`: Dishka dependency injection configuration
-   - `handlers/`: Message handlers organized by user type (user, admin, channel)
-   - `services/`: Business logic layer (UserService, AnalyticsService)
-   - `middlewares/`: Logging, metrics collection, DI injection
+**apps/bot/** — Telegram bot service (aiogram 3.13+)
+- `main.py`: Entry point, bot initialization, polling setup
+- `di_container.py`: Dishka dependency injection configuration
+- `handlers/user/`: User-facing handlers (start.py)
+- `handlers/errors.py`: Global error handler
+- `services/`: Business logic layer (UserService)
+- `keyboards/`: Inline/Reply keyboard builders
+- `filters/`: Custom aiogram filters (IsAdminFilter)
+- `states/`: FSM states for multi-step interactions
+- `middlewares/`: Event logging
 
-2. **apps/admin/** - Admin panel service (FastAPI + SQLAdmin)
-   - `main.py`: FastAPI app entry point
-   - `admin_panel/views/`: SQLAdmin model views for database management
-   - `api/routes/`: REST API endpoints (users, stats)
+### Infrastructure Layer (`infrastructure/`)
 
-3. **apps/worker/** - Background tasks (optional, Taskiq)
+- **database/core/session.py**: SQLAlchemy async engine and session management
+- **database/models/**: ORM models (User) with mixins (Base, TableNameMixin, TimestampMixin)
+- **database/repositories/**: Repository implementations (BaseRepository, UserRepository)
+- **database/uow.py**: Unit of Work for transaction management
+- **monitoring/logging.py**: Standard Python logging setup
 
-### Infrastructure Layer
-Located in `infrastructure/`, provides core services:
+### Configuration System (`config/settings/`)
 
-- **database/**: Database layer with Repository + Unit of Work pattern
-  - `core/session.py`: SQLAlchemy async engine and session management
-  - `models/`: ORM models (User, AnalyticsEvent, etc.)
-  - `repositories/`: Repository implementations extending BaseRepository
-  - `uow.py`: Unit of Work for transaction management
-  - Note: Old `requests.py` and `repo/` may exist but are deprecated in favor of `repositories/` and `uow.py`
+Settings use Pydantic Settings with `__` delimiter:
+- `base.py`: AppSettings aggregator + LoggingSettings, `@lru_cache` singleton
+- `bot.py`: BotSettings (token, admin_ids)
+- `database.py`: DatabaseSettings (PostgreSQL connection)
 
-- **cache/**: Redis caching layer
-  - `redis_client.py`: Redis connection management
-  - `cache_service.py`: High-level caching operations
+Environment variable format: `SECTION__KEY=value` (e.g., `POSTGRES__DB_HOST=localhost`)
 
-- **monitoring/**: Observability stack
-  - `logging.py`: Structured logging with structlog (JSON format)
-  - `metrics.py`: Prometheus metrics collection
+Database connection supports two modes:
+- `DATABASE_URL` env var — single connection string for external DBs (Supabase, Neon). Parsed via `model_validator(mode="before")`.
+- `POSTGRES__*` fields — individual fields for docker-compose. Used when `DATABASE_URL` is not set.
+- `SSL_MODE` env var — SSL mode for external DBs (e.g., `require`). Auto-detected from `?sslmode=` in DATABASE_URL if not set explicitly.
 
-### Configuration System
-Settings use Pydantic Settings with environment variable nesting via `__` delimiter:
+### Shared Layer (`shared/`)
 
-- `config/settings/base.py`: Main AppSettings aggregator with `@lru_cache` singleton
-- `config/settings/bot.py`: Bot token, admin IDs, feature flags
-- `config/settings/database.py`: PostgreSQL and Redis configuration
-- `config/settings/admin.py`: Admin panel settings (host, port, auth)
-- `config/settings/observability.py`: Logging, metrics, tracing, Sentry
-
-Environment variable format: `SECTION__KEY=value` (e.g., `POSTGRES__DB_HOST=localhost`, `BOT__ADMIN_IDS=[123,456]`)
+- `dto/`: Data Transfer Objects (UserCreateDTO, UserUpdateDTO, UserResponseDTO)
+- `enums/`: Application enums (UserRole, UserStatus, Language)
+- `exceptions/`: Exception hierarchy (AppException, NotFoundError, ValidationError, etc.)
 
 ### Dependency Injection (Dishka)
-The DI container is configured in `apps/bot/di_container.py` with three provider groups:
 
-1. **SettingsProvider** (Scope.APP): Application settings singleton
-2. **InfrastructureProvider**: Database engine (APP scope), sessions (REQUEST scope), Redis, cache service, UnitOfWork
-3. **ServiceProvider** (Scope.REQUEST): Business services (UserService, AnalyticsService)
+DI container in `apps/bot/di_container.py` with three provider groups:
+1. **SettingsProvider** (Scope.APP): Settings singleton
+2. **InfrastructureProvider**: Engine (APP scope), Session (REQUEST scope), UnitOfWork (REQUEST)
+3. **ServiceProvider** (Scope.REQUEST): UserService
 
 Handlers receive dependencies via `FromDishka` type hints:
 ```python
 @router.message(CommandStart())
 async def cmd_start(
     message: Message,
-    user_service: FromDishka[UserService],  # Auto-injected
+    user_service: FromDishka[UserService],
 ):
     user = await user_service.register_or_update(message.from_user)
 ```
 
 ### Data Flow Patterns
 
-**Repository Pattern** (`infrastructure/database/repositories/`):
-- `BaseRepository[T]`: Generic CRUD operations (get, create, update, delete, get_all, count)
-- `UserRepository`: User-specific queries (get_by_telegram_id, count_active_users)
-- `AnalyticsRepository`: Analytics queries
+**Repository Pattern**: `BaseRepository[T]` with generic CRUD, `UserRepository` with user-specific queries.
 
-**Unit of Work Pattern** (`infrastructure/database/uow.py`):
-- Manages transactions across multiple repositories
-- Provides `.users`, `.analytics` repository properties
-- Supports context manager: `async with UnitOfWork(session) as uow:`
-- Auto-commits on success, auto-rollbacks on exception
+**Unit of Work**: Manages transactions, provides `.users` property, auto-commits/rollbacks via DI provider.
 
-**Service Layer** (`apps/bot/services/`):
-- Encapsulates business logic
-- Uses UnitOfWork to coordinate multiple repositories
-- Example: `UserService(uow, cache)` handles user registration, updates, analytics tracking
+**Service Layer**: `UserService(uow)` encapsulates business logic.
 
-### Bot Middleware Chain
-Middlewares registered in `apps/bot/main.py` via `register_middlewares()`:
+## Marker Comments
 
-1. **MetricsMiddleware**: Collects Prometheus metrics (messages, response times)
-2. **LoggingMiddleware**: Structured logging with user context
-3. **Dishka DI Middleware** (via `setup_dishka()`): Injects dependencies into handlers
+The codebase uses marker comments to indicate registration points for new components. When adding new code, insert it **before** the marker line.
 
-### Handler Organization
-Handlers in `apps/bot/handlers/` are organized by user type:
-- `user/`: User commands and interactions
-- `admin/`: Admin-only commands (with admin filters)
-- `channel/`: Channel post handlers
-- `errors/`: Error handling routers
-
-All routers are registered in `main.py` via `register_routers()`.
-
-## Monitoring & Observability
-
-### Service URLs (via Docker Compose)
-- **Bot**: N/A (polling mode)
-- **Admin Panel**: http://localhost:8000 (API docs: /api/docs)
-- **Grafana**: http://localhost:3000 (admin/admin)
-- **Prometheus**: http://localhost:9091
-- **Dozzle** (logs viewer): http://localhost:8888
-- **Bot Metrics Endpoint**: http://localhost:9090/metrics
-
-### Metrics (Prometheus)
-The bot exposes metrics on port 9090. Common metrics:
-- `bot_messages_total{handler, status}`: Total messages processed
-- `bot_commands_total{command}`: Commands executed
-- `bot_errors_total{error_type}`: Errors occurred
-- `bot_response_time_seconds{handler}`: Response time histogram
-- `bot_active_users{period}`: Active users gauge
-
-### Logging (Structlog + Loki)
-All logs are in structured JSON format:
-```json
-{
-  "event": "bot_event_processed",
-  "user_id": 123,
-  "duration_ms": 45,
-  "level": "info",
-  "timestamp": "2024-01-15T10:30:00Z"
-}
-```
-
-Pipeline: App → Structlog → Docker logs → Promtail → Loki → Grafana
+| Marker | File | Purpose |
+|--------|------|---------|
+| `# === REGISTER NEW ROUTERS ABOVE ===` | `apps/bot/main.py` | Router registration |
+| `# === REGISTER NEW SERVICES ABOVE ===` | `apps/bot/di_container.py` | Service DI providers |
+| `# === REGISTER NEW REPOSITORIES ABOVE ===` | `infrastructure/database/uow.py` | Repository properties |
+| `# === IMPORT NEW REPOSITORIES ABOVE ===` | `infrastructure/database/repositories/__init__.py` | Repository imports |
+| `# === EXPORT NEW REPOSITORIES ABOVE ===` | `infrastructure/database/repositories/__init__.py` | Repository __all__ exports |
+| `# === IMPORT NEW MODELS ABOVE ===` | `infrastructure/database/models/__init__.py` | Model imports |
+| `# === IMPORT NEW MODELS FOR MIGRATION ABOVE ===` | `infrastructure/migrations/env.py` | Model imports for Alembic |
 
 ## Common Patterns
 
 ### Adding New Database Models
-1. Create model in `infrastructure/database/models/your_model.py`
-2. Create repository in `infrastructure/database/repositories/your_repository.py` extending `BaseRepository[YourModel]`
-3. Add repository property to `UnitOfWork` in `infrastructure/database/uow.py`:
-   ```python
-   @property
-   def your_model(self) -> YourRepository:
-       if self._your_model is None:
-           self._your_model = YourRepository(self.session)
-       return self._your_model
-   ```
-4. Create migration: `sh scripts/alembic/create_migrations.sh`
-5. Run migration: `sh scripts/alembic/run_migrations.sh`
+1. Create model in `infrastructure/database/models/`
+2. Add import in `infrastructure/database/models/__init__.py` (before marker)
+3. Add import in `infrastructure/migrations/env.py` (before marker)
+4. Create repository extending `BaseRepository[YourModel]`
+5. Register repository in `infrastructure/database/repositories/__init__.py` (before markers)
+6. Add repository property to `UnitOfWork` in `infrastructure/database/uow.py` (before marker)
+7. Create migration: `sh scripts/alembic/create_migrations.sh`
 
 ### Adding New Services
-1. Create service in `apps/bot/services/your_service.py`
-2. Add provider to `ServiceProvider` in `apps/bot/di_container.py`:
-   ```python
-   @provide
-   def get_your_service(self, uow: UnitOfWork) -> YourService:
-       return YourService(uow)
-   ```
+1. Create service in `apps/bot/services/`
+2. Add import and `@provide` method to `ServiceProvider` in `di_container.py` (before marker)
 3. Inject in handlers: `your_service: FromDishka[YourService]`
 
 ### Adding New Handlers
-1. Create handler file in `apps/bot/handlers/<category>/your_handler.py`
-2. Register router in `apps/bot/main.py` in `register_routers()`:
-   ```python
-   from apps.bot.handlers.user import your_handler
-   dp.include_router(your_handler.router)
-   ```
+1. Create handler in `apps/bot/handlers/<category>/`
+2. Register router in `apps/bot/main.py` in `register_routers()` (before marker)
 
-### Adding Admin Panel Views
-1. Create view in `apps/admin/admin_panel/views/your_admin.py` extending `ModelView`
-2. Register in `apps/admin/main.py`:
-   ```python
-   from apps.admin.admin_panel.views.your_admin import YourAdmin
-   admin.add_view(YourAdmin)
-   ```
+## Docker
 
-### Adding API Endpoints
-1. Create router file in `apps/admin/api/routes/your_route.py`
-2. Include in `apps/admin/main.py`:
-   ```python
-   from apps.admin.api.routes import your_route
-   app.include_router(your_route.router, prefix="/api", tags=["your_tag"])
-   ```
+### Standalone Dockerfile (root)
+- `Dockerfile` — single container for deployment with external DB
+- CMD: `alembic upgrade head && python3 apps/bot/main.py`
+- Requires `DATABASE_URL` env var
 
-## Docker Services
-
-The `docker-compose.yml` orchestrates these services:
-
-**Core Services**:
+### Docker Compose Services
 - `postgres`: PostgreSQL 16 (port 5432)
-- `redis`: Redis 7 (port 6379)
-- `bot`: Telegram bot container (metrics port 9090)
-- `admin`: Admin panel FastAPI app (port 8000)
+- `bot`: Telegram bot container (`telegram_bot`), uses `apps/bot/Dockerfile`
 
-**Monitoring Stack**:
-- `prometheus`: Metrics storage (port 9091)
-- `grafana`: Metrics visualization (port 3000)
-- `loki`: Log aggregation (port 3100)
-- `promtail`: Log collector (reads Docker container logs)
-
-**Development Tools**:
-- `dozzle`: Real-time container logs viewer (port 8888)
-
-All services communicate via `bot_network` bridge network.
+All compose services communicate via `bot_network` bridge network.
 
 ## Important Notes
 
 ### Environment Variables
 - Use `.env` file (copy from `.env.example`)
-- Nested settings use `__` delimiter: `POSTGRES__DB_HOST`, `BOT__ADMIN_IDS`
-- Admin IDs must be a JSON array: `BOT__ADMIN_IDS=[123456789,987654321]`
+- Nested settings use `__` delimiter
+- Admin IDs must be a JSON array: `BOT__ADMIN_IDS=[123456789]`
 
 ### Database Sessions
-- Always use async sessions from Dishka injection
-- Sessions are REQUEST scoped (created per handler invocation)
-- UnitOfWork automatically manages commits/rollbacks when used as context manager
+- Always use async sessions from Dishka injection (REQUEST scoped)
+- Commits are managed by `InfrastructureProvider.get_session`, not by repositories
+- Repositories use `session.flush()`, not `session.commit()`
 - Never create sessions manually; use DI
+
+### DI Integration
+- `auto_inject=True` is enabled — do NOT use old DI middleware or `inject` decorator
+- Use `FromDishka[ServiceType]` in handler function signatures
+- ParseMode.HTML is set as default — use HTML tags in bot messages
 
 ### Container Names
 - Bot container: `telegram_bot`
-- Admin container: `admin_panel`
-- Use these names for `docker exec` commands
-
-### Migration Workflow
-- Alembic migrations auto-run on bot container startup (via entrypoint)
-- Always create migrations before modifying database schema
-- Test migrations with `alembic upgrade head` then `alembic downgrade -1` before committing
 
 ### Settings Singleton
 - `get_settings()` uses `@lru_cache` to return singleton instance
